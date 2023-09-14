@@ -39,7 +39,7 @@ if uploaded_file is not None:
         data = {'Signal1': df['signal1'][0], 'Signal2': df['signal2'][0], 'Signal3': df['signal3'][0]}
         chart_data = pd.DataFrame(data)
 
-        st.line_chart(chart_data, color=["#ffaa00", "#ff0000", "#008000"])
+        st.line_chart(chart_data, color=[ "#ff0000","#ffaa00", "#008000"])
 
     # Interactive Chart 2 - Bar Chart
     st.write("### Interactive Bar Chart")
