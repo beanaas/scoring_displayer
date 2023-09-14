@@ -1,8 +1,6 @@
 import streamlit as st
 import json
-import plotly.express as px
 import pandas as pd
-import numpy as np
 # Streamlit App Title
 st.set_page_config(
     page_title="My Streamlit App",
