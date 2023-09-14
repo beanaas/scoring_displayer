@@ -49,4 +49,4 @@ if uploaded_file is not None:
         data = {'Signal1': df['beforeCross1'][0], 'Signal2': df['beforeCross2'][0], 'Signal3': df['beforeCross3'][0]}
         chart_data = pd.DataFrame(data)
 
-        st.line_chart(chart_data, color=["#ffaa00", "#ff0000", "#008000"])
+        st.line_chart(chart_data, color=["#ff0000","#ffaa00", "#008000"])
