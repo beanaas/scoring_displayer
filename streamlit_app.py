@@ -5,14 +5,13 @@ import cv2
 import numpy as np
 import math
 
-# Streamlit App Title
 st.set_page_config(
     page_title="My Streamlit App",
     page_icon=":chart_with_upwards_trend:",
-    layout="wide",  # You can also set the layout if needed
+    layout="centered",  # You can also set the layout if needed
     initial_sidebar_state="expanded",  # You can choose "expanded" or "collapsed"
-    
 )
+
 
 def display_shot_data():
     # Upload JSON File
@@ -179,10 +178,13 @@ def get_coordinates_data():
         'Upload an image', type=['jpg', 'png', 'jpeg'])
 
     if uploaded_image is not None:
+        image_bytes = uploaded_image.read()
+        image_array = np.asarray(bytearray(image_bytes), dtype=np.uint8)
+        image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         # Read the uploaded image
-        image = cv2.imread(uploaded_image.name, cv2.IMREAD_GRAYSCALE)
-        height, width = image.shape
+        height, width = image.shape[:2]
         # Display the original image
         #st.image(image, caption='Original Image', use_column_width=True)
 
@@ -209,8 +211,10 @@ def get_coordinates_data():
         st.table(xy_points)
 
 if __name__ == '__main__':
-    function_choice = st.selectbox("Select a function:", ["Display shot data", "Get coordinates"])
-    if function_choice == "Display shot data":
-        result = display_shot_data()
-    elif function_choice == "Get coordinates":
+    function_choice = st.selectbox("Select a function:", ["Get coordinates", "Display shot data"])
+    if function_choice == "Get coordinates":
         result = get_coordinates_data()
+    elif function_choice == "Display shot data":
+
+        result = display_shot_data()
+    
