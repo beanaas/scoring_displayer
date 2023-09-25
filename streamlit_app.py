@@ -58,51 +58,19 @@ def display_shot_data():
             st.line_chart(chart_data, color=["#ff0000", "#ffaa00", "#008000"])
 
 
-def get_coordinates_data(user_input):
+def get_coordinates_data(user_input, is_yellow):
 
-    def get_circle(image):
-        # Apply blurring, thresholding, and closing to make the circles rounder and hollow
+    def replace_yellow(image):
+        lower_yellow = np.array([10, 0, 0])
+        upper_yellow = np.array([40, 255, 255])
 
-        _, thresh = cv2.threshold(
-            image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        close = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-
-        # Find the contours of the circles
-        contours, _ = cv2.findContours(
-            close, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        # Initialize variables to track the largest circle
-        maxRadius = 0
-        maxCenter = (0, 0)
-
-        for cnt in contours:
-            # Fit an enclosing circle to the contour
-            (x, y), radius = cv2.minEnclosingCircle(cnt)
-            center = (int(x), int(y))
-            radius = int(radius)
-            if radius > maxRadius:
-                maxRadius = radius
-                maxCenter = center
-
-        # Calculate the ROI coordinates
-        x, y = maxCenter[0] - maxRadius, maxCenter[1] - maxRadius
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-        w, h = 2 * maxRadius, 2 * maxRadius
-
-        # Extract the ROI from the image
-        roi1 = image.copy()[y:y + h, x:x + w]
-
-        cv2.circle(image, maxCenter, maxRadius, (0, 255, 0), 3)
-        dot_color = (0, 255, 0)  # Red
-        dot_radius = 50
-        cv2.circle(image, maxCenter, dot_radius, dot_color, 3)
-        roi2 = image[y:y + h, x:x + w]
-        maxCenter = (maxCenter[0] - x, maxCenter[1] - y)
-        return roi1, roi2, maxCenter, maxRadius
+        # Create a mask for yellow regions in the image
+        yellow_mask = cv2.inRange(image, lower_yellow, upper_yellow)
+        black_mask = cv2.bitwise_not(yellow_mask)
+        black_background = np.zeros_like(image)
+        result_image = cv2.bitwise_and(image, image, mask=black_mask)
+        image = cv2.add(result_image, black_background)
+        return image
 
     def apply_blur(image, blur_type, kernel_size):
         if blur_type == 'Gaussian':
@@ -111,7 +79,7 @@ def get_coordinates_data(user_input):
             return cv2.medianBlur(image, kernel_size)
     # Function to process the ROI
 
-    def find_blobs(roi):
+    def find_blobs_gray(roi):
         # Apply thresholding to the ROI
         retval, threshold = cv2.threshold(roi, 200, 250, cv2.THRESH_BINARY)
         inverted = cv2.bitwise_not(threshold)
@@ -158,12 +126,131 @@ def get_coordinates_data(user_input):
 
         return im_with_keypoints, keypoints
 
+    def find_blobs_yellow(image):
+        # Apply thresholding to the ROI
+        width, height = image.shape[:2]
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        retval, threshold = cv2.threshold(gray, 100, 225, cv2.THRESH_BINARY)
+        #inverted = cv2.bitwise_not(threshold)
+
+        # Setup SimpleBlobDetector parameters.
+        params = cv2.SimpleBlobDetector_Params()
+
+        # Change thresholds
+        params.minThreshold = 100
+        params.maxThreshold = 255
+
+        # Filter by Area.
+        params.filterByArea = True
+        params.minArea = int(width/1000)
+
+        # Filter by Circularity
+        params.filterByCircularity = True
+        params.minCircularity = 0.8
+
+        # Filter by Convexity
+        params.filterByConvexity = True
+        params.minConvexity = 0.5
+
+        # Filter by Inertia
+        params.filterByInertia = True
+        params.minInertiaRatio = 0.01
+
+        # Create a detector with the parameters
+        ver = (cv2.__version__).split('.')
+        if int(ver[0]) < 3:
+            detector = cv2.SimpleBlobDetector(params)
+        else:
+            detector = cv2.SimpleBlobDetector_create(params)
+
+        # Detect blobs.
+        keypoints = detector.detect(threshold)
+
+        # Remove keypoints that are too close to each other
+        min_distance = 50  # Set the minimum distance between keypoints
+        filtered_keypoints = []
+        for i, kp1 in enumerate(keypoints):
+            is_close = False
+            for j, kp2 in enumerate(keypoints[i+1:]):
+                if cv2.norm(np.array(kp1.pt), np.array(kp2.pt)) < min_distance:
+                    is_close = True
+                    break
+            if not is_close:
+                filtered_keypoints.append(kp1)
+
+        for keypoint in filtered_keypoints:
+            keypoint.size *= 10  # You can adjust the factor as needed
+
+        # Draw detected blobs as red circles.
+        im_with_keypoints = cv2.drawKeypoints(gray, filtered_keypoints, np.array([]), (0, 255, 0),
+                                              cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+        return im_with_keypoints, filtered_keypoints
+
+    def get_target_circle(colored_image):
+        image = cv2.cvtColor(colored_image, cv2.COLOR_BGR2GRAY)
+        # Step 2: Apply blurring and thresholding to enhance circle shapes
+        _, binary_image = cv2.threshold(
+            image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+        # Step 3: Apply morphological closing to make circles smoother and close gaps
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        closed_image = cv2.morphologyEx(binary_image, cv2.MORPH_CLOSE, kernel)
+
+        # Step 4: Find contours of the circles in the processed image
+        contours, _ = cv2.findContours(
+            closed_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Step 5: Set a circularity threshold
+        circularity_threshold = 0.8
+        maxCenter = 0
+        maxRadius = 0
+
+        for contour in contours:
+            # Step 6: Fit an enclosing circle to the contour
+            (x, y), radius = cv2.minEnclosingCircle(contour)
+            center = (int(x), int(y))
+            radius = int(radius)
+
+            # Step 7: Calculate the contour area and the circularity
+            area = cv2.contourArea(contour)
+
+            circle_area = radius * radius * np.pi
+            if area == 0 or circle_area == 0:
+                continue
+            circularity = area / circle_area
+
+            # Step 8: Draw only the contours that have high circularity
+            if circularity > circularity_threshold:
+                if radius > maxRadius:
+                    maxRadius = radius
+                    maxCenter = center
+
+        # Step 7: Calculate the ROI coordinates
+        x, y = maxCenter[0] - maxRadius, maxCenter[1] - maxRadius
+        x = max(0, x)
+        y = max(0, y)
+        w, h = 2 * maxRadius, 2 * maxRadius
+
+        # Step 8: Extract the ROI from the image
+        cropped_image = colored_image[y:y + h, x:x + w]
+
+        # Step 9: Draw circles on the original image for visualization
+        cv2.circle(image, maxCenter, maxRadius, (0, 255, 0), 3)
+        dot_color = (0, 255, 0)  # Red
+        dot_radius = 50
+        cv2.circle(image, maxCenter, dot_radius, dot_color, 3)
+
+        # Step 10: Extract the second ROI with circles drawn
+        cropped_gray = image[y:y + h, x:x + w]
+
+        return cropped_image, cropped_gray
+
     def get_xy_from_blobs(points, image):
         diameter = user_input  # measured in mm
         # Extract height and width from the image shape
         height, width = image.shape[:2]
         size = math.ceil(height / 1000)
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
         xy_points = []
         for point in points:
             # Round to one decimal place
@@ -185,26 +272,29 @@ def get_coordinates_data(user_input):
     if uploaded_image is not None:
         image_bytes = uploaded_image.read()
         image_array = np.asarray(bytearray(image_bytes), dtype=np.uint8)
-        image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        # Read the uploaded image
-        height, width = image.shape[:2]
+        colored_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        colored_image_rgb = cv2.cvtColor(colored_image, cv2.COLOR_BGR2RGB)
+        height, width = colored_image.shape[:2]
         # Display the original image
-        #st.image(image, caption='Original Image', use_column_width=True)
+        st.image(colored_image_rgb, caption='Original Image',
+                 use_column_width=True)
+        cropped_image, cropped_gray = get_target_circle(colored_image)
+        if(is_yellow):
+            hsv_image = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2HSV)
+            replaced = replace_yellow(hsv_image)
+            blurred_image = cv2.cvtColor(replaced, cv2.COLOR_HSV2BGR)
+            image_with_blobs, points = find_blobs_yellow(blurred_image)
+        else:
+            blur_type = "Median"
+            rounded_integer = round(height/200)
+            # Make it an odd number (if it's even)
+            kernel_size = rounded_integer + 1 if rounded_integer % 2 == 0 else rounded_integer
+            # Apply blur to the image
+            blurred_image = apply_blur(cropped_gray, blur_type, kernel_size)
+            image_with_blobs, points = find_blobs_gray(blurred_image)
 
-        roi_image, with_line, center, radius = get_circle(image)
-
-        blur_type = "Median"
-        rounded_integer = round(height/200)
-        # Make it an odd number (if it's even)
-        kernel_size = rounded_integer + 1 if rounded_integer % 2 == 0 else rounded_integer
-        # Apply blur to the image
-        blurred_image = apply_blur(roi_image, blur_type, kernel_size)
-
-        image_with_blobs, points = find_blobs(blurred_image)
-
-        final_image, xy_points = get_xy_from_blobs(points, roi_image)
+        final_image, xy_points = get_xy_from_blobs(points, cropped_image)
+        final_image = cv2.cvtColor(final_image, cv2.COLOR_BGR2RGB)
 
         st.image(final_image, caption='Coordinates of shot',
                  use_column_width=True)
@@ -219,12 +309,14 @@ def get_coordinates_data(user_input):
 if __name__ == '__main__':
     function_choice = st.selectbox(
         "Select a function:", ["Get coordinates", "Display shot data"])
+
     if function_choice == "Get coordinates":
         user_input = st.text_input("Enter diameter in mm:")
+        is_yellow = st.checkbox('Yellow target')
         if(user_input):
-            result = get_coordinates_data(int(user_input))
+            result = get_coordinates_data(int(user_input), is_yellow)
         else:
-            result = get_coordinates_data(210)
+            result = get_coordinates_data(210, is_yellow)
     elif function_choice == "Display shot data":
 
         result = display_shot_data()
